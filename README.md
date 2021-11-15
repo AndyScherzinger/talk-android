@@ -54,6 +54,11 @@ Make sure you read [SETUP.md](/SETUP.md) and [CONTRIBUTING.md](/CONTRIBUTING.md)
 But basically: fork this repository and contribute back using pull requests to the master branch.
 Easy starting points are also reviewing [pull requests](https://github.com/nextcloud/talk-android/pulls) and working on [starter issues](https://github.com/nextcloud/talk-android/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22).
 
+Please be aware that currently java8 and Android Studio <= 4.2.1 is needed to compile this project! (needs to be fixed 
+with https://github.com/nextcloud/talk-android/issues/1125)
+To set the JDK version for this project, open the "module settings", click on "SDK location" and there set the "JDK 
+location" (for example: "/usr/lib/jvm/java-1.8.0-openjdk"). 
+
 ### Testing :test_tube:
 
 So you would like to contribute by testing? Awesome, we appreciate that very much. 
