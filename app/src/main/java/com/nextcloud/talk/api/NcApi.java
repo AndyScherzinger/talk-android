@@ -646,10 +646,4 @@ public interface NcApi {
     @DELETE
     Observable<GenericOverall> rejectInvitation(@Header("Authorization") String authorization,
                                                 @Url String url);
-
-    @GET
-    Observable<MentionOverall> getMentionDetails(@Header("Authorization") String authorization,
-                                                 @Url String url,
-                                                 @Query("mentionId") String mentionId,
-                                                 @QueryMap Map<String, String> fields);
 }
