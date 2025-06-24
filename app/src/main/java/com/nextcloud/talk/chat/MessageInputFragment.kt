@@ -81,6 +81,11 @@ import com.nextcloud.talk.utils.text.Spans
 import com.otaliastudios.autocomplete.Autocomplete
 import com.stfalcon.chatkit.commons.models.IMessage
 import com.vanniktech.emoji.EmojiPopup
+import io.reactivex.Observer
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.disposables.Disposable
+import io.reactivex.schedulers.Schedulers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -124,6 +129,9 @@ class MessageInputFragment : Fragment() {
     @Inject
     lateinit var networkMonitor: NetworkMonitor
 
+    @Inject
+    lateinit var ncApi: NcApi
+
     lateinit var binding: FragmentMessageInputBinding
     private lateinit var conversationInternalId: String
     private var typedWhileTypingTimerIsRunning: Boolean = false
@@ -134,6 +142,7 @@ class MessageInputFragment : Fragment() {
     private var xcounter = 0f
     private var ycounter = 0f
     private var collapsed = false
+    private val disposables = CompositeDisposable()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -166,6 +175,7 @@ class MessageInputFragment : Fragment() {
         if (mentionAutocomplete != null && mentionAutocomplete!!.isPopupShowing) {
             mentionAutocomplete?.dismissPopup()
         }
+        disposables.clear()
         clearEditUI()
         cancelReply()
     }
@@ -933,14 +943,97 @@ class MessageInputFragment : Fragment() {
 
     private fun setEditUI(message: ChatMessage) {
         binding.fragmentEditView.editMessage.text = message.message
-        binding.fragmentMessageInputView.inputEditText.setText(message.message)
-        val end = binding.fragmentMessageInputView.inputEditText.text.length
-        binding.fragmentMessageInputView.inputEditText.setSelection(end)
+        val editText = binding.fragmentMessageInputView.inputEditText
+        editText.setText(message.message)
+
+        // Convert mention placeholders to MentionChipSpans
+        val editable = editText.editableText
+        val mentionPattern = Regex("@([\\w-]+(?:\\s[\\w-]+)*)") // Regex to find mentions like @user-id or @Guest User
+        var matchResult = mentionPattern.find(editable)
+        while (matchResult != null) {
+            val mentionIdWithQuotes = matchResult.groupValues[0]
+            val mentionId = mentionIdWithQuotes.drop(1).removeSurrounding("\"") // Remove "@" and quotes
+            val start = matchResult.range.first
+            val end = matchResult.range.last + 1
+
+            val queryMap = HashMap<String, String>()
+            queryMap["includeStatus"] = "true"
+
+            ncApi.getMentionDetails(
+                ApiUtils.getCredentials(chatActivity.conversationUser!!.username, chatActivity.conversationUser!!.token),
+                ApiUtils.getUrlForMentionSuggestions(chatActivity.chatApiVersion, chatActivity.conversationUser!!.baseUrl, chatActivity.roomToken),
+                mentionId,
+                queryMap
+            )
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(object : Observer<MentionOverall> {
+                    override fun onSubscribe(d: Disposable) {
+                        disposables.add(d)
+                    }
+
+                    override fun onNext(mentionOverall: MentionOverall) {
+                        if (mentionOverall.ocs != null && mentionOverall.ocs.data.isNotEmpty()) {
+                            val mention = mentionOverall.ocs.data[0]
+                            mention.roomToken = chatActivity.roomToken
+
+                            val mentionChipSpan = Spans.MentionChipSpan(
+                                DisplayUtils.getDrawableForMentionChipSpan(
+                                    requireContext(),
+                                    mention.id,
+                                    mention.roomToken,
+                                    mention.label,
+                                    chatActivity.conversationUser!!,
+                                    mention.source,
+                                    R.xml.chip_you, // This might need adjustment based on mention type
+                                    editText,
+                                    viewThemeUtils,
+                                    "federated_users" == mention.source
+                                ),
+                                BetterImageSpan.ALIGN_CENTER,
+                                mention.id,
+                                mention.label
+                            )
+                            // Check if the view is still valid before trying to update the UI
+                            if (isAdded && view != null) {
+                                editable.setSpan(mentionChipSpan, start, end, Editable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                            }
+                        } else {
+                            // Fallback: if mention details can't be fetched, display the ID as text
+                            // Or handle as an error, e.g., log it or show a placeholder
+                            Log.w(TAG, "Could not fetch details for mention: $mentionId")
+                            // Optionally, create a simple text span if needed
+                        }
+                    }
+
+                    override fun onError(e: Throwable) {
+                        Log.e(TAG, "Error fetching mention details for $mentionId", e)
+                        // Fallback: Display the ID as text or handle error
+                    }
+
+                    override fun onComplete() {}
+                })
+            matchResult = mentionPattern.find(editable, end)
+        }
+
+        val selectionEnd = editText.text.length
+        editText.setSelection(selectionEnd)
         binding.fragmentMessageInputView.messageSendButton.visibility = View.GONE
         binding.fragmentMessageInputView.recordAudioButton.visibility = View.GONE
         binding.fragmentMessageInputView.editMessageButton.visibility = View.VISIBLE
         binding.fragmentEditView.editMessageView.visibility = View.VISIBLE
         binding.fragmentMessageInputView.attachmentButton.visibility = View.GONE
+    }
+
+    private fun inferSourceFromMentionId(mentionId: String): String {
+        return when {
+            mentionId.startsWith("guest/") -> MentionAutocompleteItem.SOURCE_GUESTS
+            mentionId.startsWith("group/") -> MentionAutocompleteItem.SOURCE_GROUPS
+            mentionId.startsWith("email/") -> MentionAutocompleteItem.SOURCE_EMAILS
+            mentionId.startsWith("team/") -> MentionAutocompleteItem.SOURCE_TEAMS
+            // Add more cases as needed, e.g., for federated users if distinguishable
+            else -> "users" // Default to users
+        }
     }
 
     private fun clearEditUI() {

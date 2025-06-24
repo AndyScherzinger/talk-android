@@ -285,4 +285,12 @@ interface NcApiCoroutines {
 
     @DELETE
     suspend fun unbindRoom(@Header("Authorization") authorization: String, @Url url: String): GenericOverall
+
+    @GET
+    suspend fun getMentionDetails(
+        @Header("Authorization") authorization: String,
+        @Url url: String,
+        @Query("mentionId") mentionId: String,
+        @QueryMap fields: Map<String, String>
+    ): MentionOverall
 }
