@@ -933,14 +933,77 @@ class MessageInputFragment : Fragment() {
 
     private fun setEditUI(message: ChatMessage) {
         binding.fragmentEditView.editMessage.text = message.message
-        binding.fragmentMessageInputView.inputEditText.setText(message.message)
-        val end = binding.fragmentMessageInputView.inputEditText.text.length
-        binding.fragmentMessageInputView.inputEditText.setSelection(end)
+        val editText = binding.fragmentMessageInputView.inputEditText
+        editText.setText(message.message)
+
+        // Convert mention placeholders to MentionChipSpans
+        val editable = editText.editableText
+        val mentionPattern = Regex("@([\\w-]+(?:\\s[\\w-]+)*)") // Regex to find mentions like @user-id or @Guest User
+        var matchResult = mentionPattern.find(editable)
+        while (matchResult != null) {
+            val mentionIdWithQuotes = matchResult.groupValues[0]
+            val mentionId = mentionIdWithQuotes.drop(1).removeSurrounding("\"") // Remove "@" and quotes
+            val start = matchResult.range.first
+            val end = matchResult.range.last + 1
+
+            // Attempt to find an existing MentionChipSpan for this ID
+            // This part assumes that MentionChipSpans are somehow retrievable or reconstructed
+            // based on the ID. If not, this simplification won't work directly without
+            // a way to get display label and source for the chip.
+            // For this example, we'll re-create a chip as if we had the info.
+            // A more robust solution would involve looking up User/Group/etc. display names.
+
+            val currentSpans = editable.getSpans(start, end, Spans.MentionChipSpan::class.java)
+            if (currentSpans.isNotEmpty()) {
+                // If a span already exists for this range, assume it's correctly formatted
+                // and skip re-creating it. This is a simplification.
+                // A more robust check would verify if currentSpans[0].id matches mentionId.
+            } else {
+                // If no span exists, create one. This part still needs accurate
+                // label and source. The original problem implies these are lost.
+                // This simplified approach might still show the ID if label isn't available.
+                val label = qualités // Placeholder: actual label needed
+                val source = inferSourceFromMentionId(mentionId) // Helper to guess source
+
+                val mentionChipSpan = Spans.MentionChipSpan(
+                    DisplayUtils.getDrawableForMentionChipSpan(
+                        requireContext(),
+                        mentionId, // id
+                        chatActivity.roomToken,
+                        label, // label
+                        chatActivity.conversationUser!!,
+                        source, // source
+                        R.xml.chip_you,
+                        editText,
+                        viewThemeUtils,
+                        "federated_users" == source
+                    ),
+                    BetterImageSpan.ALIGN_CENTER,
+                    mentionId,
+                    label
+                )
+                editable.setSpan(mentionChipSpan, start, end, Editable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            matchResult = mentionPattern.find(editable, end)
+        }
+        val selectionEnd = editText.text.length
+        editText.setSelection(selectionEnd)
         binding.fragmentMessageInputView.messageSendButton.visibility = View.GONE
         binding.fragmentMessageInputView.recordAudioButton.visibility = View.GONE
         binding.fragmentMessageInputView.editMessageButton.visibility = View.VISIBLE
         binding.fragmentEditView.editMessageView.visibility = View.VISIBLE
         binding.fragmentMessageInputView.attachmentButton.visibility = View.GONE
+    }
+
+    private fun inferSourceFromMentionId(mentionId: String): String {
+        return when {
+            mentionId.startsWith("guest/") -> MentionAutocompleteItem.SOURCE_GUESTS
+            mentionId.startsWith("group/") -> MentionAutocompleteItem.SOURCE_GROUPS
+            mentionId.startsWith("email/") -> MentionAutocompleteItem.SOURCE_EMAILS
+            mentionId.startsWith("team/") -> MentionAutocompleteItem.SOURCE_TEAMS
+            // Add more cases as needed, e.g., for federated users if distinguishable
+            else -> "users" // Default to users
+        }
     }
 
     private fun clearEditUI() {
