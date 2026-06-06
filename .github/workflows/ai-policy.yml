@@ -43,6 +43,36 @@ jobs:
           cat /tmp/pr_commits.txt
           echo "--------------------------"
 
+      - name: Define shared agent detection patterns
+        run: |
+          set -euo pipefail
+
+          # Email addresses known to be used by coding agents.
+          # These should never appear in Signed-off-by because the DCO can only be attested by a human.
+          EMAIL_PATTERN="copilot@github\.com\
+            |noreply@anthropic\.com\
+            |devin@cognition\.ai\
+            |devin@cognition-labs\.com\
+            |aider@aider\.chat\
+            |noreply@aider\.chat\
+            |codex@openai\.com\
+            |cursor@anysphere\.com\
+            |windsurf@codeium\.com\
+            |codeium@codeium\.com\
+            |amazon-q@amazon\.com\
+            |codewhisperer@amazon\.com\
+            |gemini-code-assist@google\.com\
+            |openhands@all-hands\.dev\
+            |swe-agent@princeton\.edu"
+
+          # Strip embedded whitespace (used above only for readability)
+          EMAIL_PATTERN=$(echo "$EMAIL_PATTERN" | tr -d ' \n')
+          echo "AGENT_EMAIL_PATTERN=${EMAIL_PATTERN}" >> "$GITHUB_ENV"
+
+          # Display-name prefixes used by known coding agents (shared by Signed-off-by and Co-Authored-By checks)
+          # shellcheck disable=SC2016
+          echo 'AGENT_NAMES=GitHub Copilot|Claude( [A-Za-z0-9. -]+)?|Devin( AI)?|aider( \(.*\))?|OpenAI Codex|Cursor( AI)?|Windsurf|Amazon Q|CodeWhisperer|Gemini Code Assist|OpenHands|SWE-agent|AutoCodeRover|Tabnine' >> "$GITHUB_ENV"
+
       - name: Check for AI-assistant / Assisted-by trailers
         id: ai_trailers
         run: |
@@ -60,32 +90,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Email addresses known to be used by coding agents in Signed-off-by trailers.
-          # These should never appear because the DCO can only be attested by a human.
-          EMAIL_PATTERN="copilot@github\.com\
-            |noreply@anthropic\.com\
-            |devin@cognition\.ai\
-            |devin@cognition-labs\.com\
-            |aider@aider\.chat\
-            |noreply@aider\.chat\
-            |codex@openai\.com\
-            |cursor@anysphere\.com\
-            |windsurf@codeium\.com\
-            |codeium@codeium\.com\
-            |amazon-q@amazon\.com\
-            |codewhisperer@amazon\.com\
-            |gemini-code-assist@google\.com\
-            |openhands@all-hands\.dev\
-            |swe-agent@princeton\.edu"
-
-          # Strip embedded whitespace from the pattern (used above only for readability)
-          EMAIL_PATTERN=$(echo "$EMAIL_PATTERN" | tr -d ' \n')
-
-          # Display-name prefixes in Signed-off-by used by known coding agents
-          NAME_PATTERN="^Signed-off-by: *(GitHub Copilot|Claude( [A-Za-z0-9. -]+)?|Devin( AI)?|aider( \(.*\))?|OpenAI Codex|Cursor( AI)?|Windsurf|Amazon Q|CodeWhisperer|Gemini Code Assist|OpenHands|SWE-agent|AutoCodeRover|Tabnine) *[<(]"
-
-          EMAIL_HITS=$(grep -iE "^Signed-off-by:.*<(${EMAIL_PATTERN})>" /tmp/pr_commits.txt 2>/dev/null || true)
-          NAME_HITS=$(grep -iE "${NAME_PATTERN}" /tmp/pr_commits.txt 2>/dev/null || true)
+          EMAIL_HITS=$(grep -iE "^Signed-off-by:.*<(${AGENT_EMAIL_PATTERN})>" /tmp/pr_commits.txt 2>/dev/null || true)
+          NAME_HITS=$(grep -iE "^Signed-off-by: *(${AGENT_NAMES}) *[<(]" /tmp/pr_commits.txt 2>/dev/null || true)
 
           AGENT_LINES=$(printf '%s\n%s' "$EMAIL_HITS" "$NAME_HITS" | sort -u | sed '/^[[:space:]]*$/d')
 
@@ -106,28 +112,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          EMAIL_PATTERN="copilot@github\.com\
-            |noreply@anthropic\.com\
-            |devin@cognition\.ai\
-            |devin@cognition-labs\.com\
-            |aider@aider\.chat\
-            |noreply@aider\.chat\
-            |codex@openai\.com\
-            |cursor@anysphere\.com\
-            |windsurf@codeium\.com\
-            |codeium@codeium\.com\
-            |amazon-q@amazon\.com\
-            |codewhisperer@amazon\.com\
-            |gemini-code-assist@google\.com\
-            |openhands@all-hands\.dev\
-            |swe-agent@princeton\.edu"
-
-          EMAIL_PATTERN=$(echo "$EMAIL_PATTERN" | tr -d ' \n')
-
-          NAME_PATTERN="^Co-Authored-By: *(GitHub Copilot|Claude( [A-Za-z0-9. -]+)?|Devin( AI)?|aider( \(.*\))?|OpenAI Codex|Cursor( AI)?|Windsurf|Amazon Q|CodeWhisperer|Gemini Code Assist|OpenHands|SWE-agent|AutoCodeRover|Tabnine) *[<(]"
-
-          EMAIL_HITS=$(grep -iE "^Co-Authored-By:.*<(${EMAIL_PATTERN})>" /tmp/pr_commits.txt 2>/dev/null || true)
-          NAME_HITS=$(grep -iE "${NAME_PATTERN}" /tmp/pr_commits.txt 2>/dev/null || true)
+          EMAIL_HITS=$(grep -iE "^Co-Authored-By:.*<(${AGENT_EMAIL_PATTERN})>" /tmp/pr_commits.txt 2>/dev/null || true)
+          NAME_HITS=$(grep -iE "^Co-Authored-By: *(${AGENT_NAMES}) *[<(]" /tmp/pr_commits.txt 2>/dev/null || true)
 
           CO_AUTHORED=false
           if [ -n "$EMAIL_HITS" ] || [ -n "$NAME_HITS" ]; then
@@ -164,6 +150,7 @@ jobs:
         if: steps.agent_signoff.outputs.agent_signoff == 'true'
         env:
           AGENT_LINES: ${{ steps.agent_signoff.outputs.agent_lines }}
+          AGENTS_MD_URL: https://github.com/${{ github.repository }}/blob/${{ github.base_ref }}/AGENTS.md
         run: |
           echo "::error title=Coding-agent sign-off detected::A Signed-off-by trailer from a known coding agent was found in one or more commits."
           echo ""
@@ -173,5 +160,15 @@ jobs:
           echo "The 'Signed-off-by' trailer represents the Developer Certificate of Origin (DCO)"
           echo "and must only be attested by a human contributor."
           echo "Please amend the affected commit(s) to remove the coding-agent sign-off"
-          echo "and replace it with an 'Assisted-by' trailer."
+          echo "and replace it with an 'Assisted-by' trailer, for example:"
+          echo ""
+          echo "  Assisted-by: Claude Code:claude-sonnet-4-6"
+          echo ""
+          echo "References:"
+          echo "  • AGENTS.md (this repository)"
+          echo "    ${AGENTS_MD_URL}"
+          echo "  • AI Contribution Policy"
+          echo "    https://github.com/nextcloud/.github/blob/master/AI_POLICY.md"
+          echo "  • Contribution Guidelines"
+          echo "    https://github.com/nextcloud/.github/blob/master/CONTRIBUTING.md"
           exit 1
